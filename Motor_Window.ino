@@ -47,9 +47,13 @@ WiFiClient espClient;
 PubSubClient client(espClient);
 
 long lastMsg = 0;
+long lastStatus = 0;
 char msg[50];
-//int value = 0;
+boolean motor_on = 0;
+boolean opening = 0;
 int status;
+unsigned long motor_timer;
+unsigned long motor_timeout;
 
 void setup_wifi() {
 
@@ -73,20 +77,22 @@ void setup_wifi() {
   Serial.println("IP address: ");
   Serial.println(WiFi.localIP());
 }
-void window_open (int val)
-{
+/*void window_open (int val)
+  {
   if (val > 100) {
     val = 100;
   }
   digitalWrite(D3, LOW);   // DA LOW
   digitalWrite(D1, HIGH);   // PWM_A HIGH
   Serial.print("Opening...");
-  delay(val * SPR);
-  digitalWrite(D1, LOW);   // PWM_A LOW
-  Serial.println("...Done");
+  //motor_on = 1;
+  //  delay(val * SPR);
+  //  digitalWrite(D1, LOW);   // PWM_A LOW
+  //  Serial.println("...Done");
 
-  status = status + val;
-}
+  //  status = status + val;
+  }
+*/
 void window_close (int val)
 {
   digitalWrite(D3, HIGH);   // DA HIGH
@@ -94,10 +100,10 @@ void window_close (int val)
   Serial.print("Closing...");
 
   delay(val * SPR);
-  Serial.println("...Done");
-
+  //  Serial.println("...Done");
+  //motor_on = 1;
   digitalWrite(D1, LOW);   // PWM_A LOW
-  status = status - val;
+  //  status = status - val;
 
   // wait
 }
@@ -107,37 +113,53 @@ void callback(char* topic, byte* payload, unsigned int length) {
   Serial.print("] ");
   int payload_value = atoi((const char *)payload);
 
-  /*  for (int i = 0; i < length; i++) {
-      Serial.print((int)payload[i]);
-    }
-    Serial.println();
-  */
+
   Serial.print (payload_value);
 
 
 
-  // Switch on the LED if an 1 was received as first character
-  //
-  //   int payload_value = int(&payload);
-
   if ((payload_value) >= status ) { // open more
-    window_open(payload_value - status);
+    digitalWrite(D3, LOW);   // DA LOW
+    digitalWrite(D1, HIGH);   // PWM_A HIGH
+    Serial.print("Opening to...");
+    motor_on = 1;
+    opening = 1;
+    motor_timeout = (payload_value - status) * SPR;
+    Serial.println (payload_value - status);
+    //window_open(payload_value - status);
     // but actually the LED is on; this is because
     // it is active low on the ESP-01)
   }
   else if (payload_value == 0) {         // completely close
-    window_close (status + 10);// so it is closed for sure
-    status=0;
+    digitalWrite(D3, HIGH);   // DA HIGH
+    digitalWrite(D1, HIGH);   // PWM_A HIGH
+    Serial.print("Closing to...");
+    motor_on = 1;
+    opening = 0;
+    motor_timeout = status  * SPR; // so it is closed for sure
+    Serial.println (status - payload_value);
+
+    //status = 0;
   }
   else {
-    window_close(status - payload_value);       //close a little 
+    digitalWrite(D3, HIGH);   // DA HIGH
+    digitalWrite(D1, HIGH);   // PWM_A HIGH
+    Serial.print("Closing...");
+    motor_on = 1;
+    opening = 0;
+    motor_timeout = (status - payload_value) * SPR; //close a value
+    //window_close(status - payload_value);
+    Serial.println (status - payload_value );
+
+
   }
 
+  motor_timer = millis();
+  //snprintf(msg, sizeof(msg), "%d", status);
+  Serial.print("motor_timer reset, start moving ");
 
-snprintf(msg, sizeof(msg), "%d", status);
-    Serial.print("Publish message: ");
-    Serial.println(msg);
-    client.publish(MQTT_TOPIC, msg);
+  Serial.println(motor_timeout);
+  //client.publish(MQTT_TOPIC, msg);
 
 
 
@@ -168,7 +190,7 @@ void reconnect() {
 }
 
 void setup() {
-  pinMode(BUILTIN_LED, OUTPUT);     // Initialize the BUILTIN_LED pin as an output
+  window_close(10);
   Serial.begin(115200);
   setup_wifi();
   client.setServer(MQTT_HOST, MQTT_PORT);
@@ -177,8 +199,8 @@ void setup() {
   // Motor initialisation
   pinMode(D1, OUTPUT); // инициализируем Pin как выход
   pinMode(D3, OUTPUT); // инициализируем Pin как выход
-  window_close(99);
-  status=0;
+
+  status = 0;
 
 
 }
@@ -190,8 +212,8 @@ void loop() {
   }
   client.loop();
 
-  long now = millis();
-  if (now - lastMsg > 60000) {
+  long unsigned now = millis();
+  if (now - lastMsg > 60000) {      //every 1 min send status
     lastMsg = now;
     //snprintf (msg, 50, "I am ok #%ld", value);
     snprintf(msg, sizeof(msg), "%d", status);
@@ -199,4 +221,33 @@ void loop() {
     Serial.println(msg);
     client.publish(MQTT_TOPIC, msg);
   }
+  if (motor_on) {
+    if (now - motor_timer >= motor_timeout) {   //if time is out stop motor
+      digitalWrite(D1, LOW);       //stop motor
+      motor_on = 0;
+    }
+    if (now - lastStatus >= SPR) {    //every 1 sec update status on moving motor
+      lastStatus = now;
+
+      if (opening == 0) {
+        status--;
+        if (status < 0) {
+          status = 0;
+        }
+      }
+      else {
+        status++;
+        if (status >100) {
+          status = 100;
+        }
+
+      }
+      snprintf(msg, sizeof(msg), "%d", status);
+      Serial.print("Publish message: ");
+      Serial.println(msg);
+      client.publish(MQTT_TOPIC, msg);  // send status of moving motor
+    }
+
+  }
+
 }

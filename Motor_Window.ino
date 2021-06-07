@@ -39,8 +39,8 @@
 
 // Update these with values suitable for your network.
 
-const char* ssid = "Yurick";
-const char* password = "superyurick";
+const char* ssid = "My_ssid";
+const char* password = "my_password";
 const char* mqtt_server = "192.168.0.15";
 
 WiFiClient espClient;
